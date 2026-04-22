@@ -1,0 +1,6 @@
+{
+  "name": "TotoGo",
+  "description": "A comprehensive ride-hailing application with real-time tracking, wallet system, and streak rewards.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": []
+}

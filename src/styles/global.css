@@ -1,0 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,100..900;1,100..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Urbanist", ui-sans-serif, system-ui, sans-serif;
+  --color-primary: #000000;
+  --color-secondary: #ffffff;
+  --color-accent: #000000;
+
+  @keyframes loading {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(200%); }
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+  @apply bg-gray-50 text-gray-900 selection:bg-secondary/30;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
