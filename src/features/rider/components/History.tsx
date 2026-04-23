@@ -20,7 +20,7 @@ export default function RidesHistory() {
       .from('rides')
       .select('*')
       .eq('rider_id', profile!.id)
-      .order('created_at', { ascending: false });
+      .order('requested_at', { ascending: false });
     
     if (data) setRides(data as Ride[]);
     setLoading(false);
@@ -45,7 +45,7 @@ export default function RidesHistory() {
                <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center space-x-2 text-xs font-bold text-gray-400 uppercase tracking-widest">
                      <Calendar size={14} />
-                     <span>{format(new Date(ride.created_at), 'dd MMM yyyy, hh:mm a')}</span>
+                     <span>{format(new Date(ride.requested_at), 'dd MMM yyyy, hh:mm a')}</span>
                   </div>
                   <span className={cn(
                     "text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-lg",

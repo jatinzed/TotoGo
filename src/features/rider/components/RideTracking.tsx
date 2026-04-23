@@ -5,9 +5,11 @@ import L from 'leaflet';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Phone, MessageSquare, Star, Loader2, ShieldCheck, Navigation, AlertCircle } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
-import { Ride, DriverProfile, UserProfile } from '../../common/types';
+import { Ride, DriverProfile, UserProfile, RideStatus } from '../../common/types';
 import { formatCurrency, cn } from '../../../utils/format';
 import { useRouting, RouteData } from '../../../lib/maps/routing';
+import { useRideStore } from '../../common/stores/rideStore';
+import { useAuthStore } from '../../common/stores/authStore';
 import { parsePoint, toLatLngTuple } from '../../../utils/geo';
 import { ChangeView } from '../../../components/common/ChangeView';
 
@@ -15,79 +17,52 @@ export default function RideTracking() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { getRoute } = useRouting();
+  const { currentRide: ride, fetchRide, subscribeToRide, cancelRide, isLoading } = useRideStore();
   
-  const [ride, setRide] = useState<Ride | null>(null);
   const [driver, setDriver] = useState<UserProfile & { driver_profile: DriverProfile } | null>(null);
   const [driverLocation, setDriverLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [route, setRoute] = useState<RouteData | null>(null);
-  const [cancelling, setCancelling] = useState(false);
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState(0);
+  const [showInsufficientModal, setShowInsufficientModal] = useState(false);
 
   useEffect(() => {
     if (id) {
-      fetchRide();
-      const subscription = subscribeToRide();
-      return () => {
-        subscription.unsubscribe();
-      };
+      fetchRide(id);
+      const unsubscribe = subscribeToRide(id);
+      return () => unsubscribe();
     }
   }, [id]);
 
-  const fetchRide = async () => {
-    const { data } = await supabase
-      .from('rides')
-      .select('*, driver:driver_id(id, full_name, phone, driver_profile:driver_profiles(*))')
-      .eq('id', id)
-      .single();
-    
-    if (data) {
-      setRide(data);
-      if (data.driver) {
-        setDriver(data.driver);
-        if (data.driver.driver_profile?.location) {
-          setDriverLocation(parsePoint(data.driver.driver_profile.location));
-        }
-      }
-
-      // Fetch Route
-      const p = parsePoint(data.pickup_geometry);
-      const d = parsePoint(data.dropoff_geometry);
-      if (p && d) {
-        getRoute(p, d).then(res => {
-          if (res) setRoute(res.primary);
-        });
-      }
-
-      if (data.status === 'completed' && !data.rider_rating) {
-        setShowRating(true);
-      }
+  useEffect(() => {
+    if (ride?.driver) {
+       setDriver(ride.driver as any);
+       if ((ride.driver as any).driver_profile?.location) {
+         setDriverLocation(parsePoint((ride.driver as any).driver_profile.location));
+       }
     }
-  };
+    
+    if (ride?.pickup_geometry && ride?.dropoff_geometry && !route) {
+       const p = parsePoint(ride.pickup_geometry);
+       const d = parsePoint(ride.dropoff_geometry);
+       if (p && d) {
+         getRoute(p, d).then(res => {
+           if (res) setRoute(res.primary);
+         });
+       }
+    }
 
-  const subscribeToRide = () => {
-    return supabase
-      .channel(`ride-${id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides', filter: `id=eq.${id}` }, (payload) => {
-        const newRide = payload.new as Ride;
-        setRide(prev => prev ? { ...prev, ...newRide } : newRide);
-        
-        if (newRide.status === 'completed') {
-          setShowRating(true);
-        }
-        
-        if (newRide.driver_id && (!driver || driver.id !== newRide.driver_id)) {
-           fetchRide(); // Fetch new driver details
-        }
-      })
-      .subscribe();
-  };
+    if (ride?.status === 'completed' && !ride?.rider_rating) {
+      setShowRating(true);
+    }
+  }, [ride, route]);
 
   // Subscribe to driver location if assigned
   useEffect(() => {
     if (driver?.id) {
+      const channelName = `driver-loc-${driver.id}-${Date.now()}`;
       const locationSub = supabase
-        .channel(`driver-loc-${driver.id}`)
+        .channel(channelName)
         .on('postgres_changes', { 
             event: 'UPDATE', 
             schema: 'public', 
@@ -103,38 +78,103 @@ export default function RideTracking() {
     }
   }, [driver?.id]);
 
+  // Subscribe to driver location if assigned
+  useEffect(() => {
+    if (ride?.driver_id) {
+      const channelName = `driver-location-${ride.driver_id}-${Date.now()}`;
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'driver_profiles',
+            filter: `user_id=eq.${ride.driver_id}`
+          },
+          (payload) => {
+            const loc = payload.new.location;
+            if (loc) {
+              setDriverLocation(parsePoint(loc));
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [ride?.driver_id]);
+
   const handleCancel = async () => {
     if (!ride) return;
-    setCancelling(true);
     try {
-      const idempotencyKey = crypto.randomUUID();
-      if (ride.status === 'requested') {
-        const { error } = await supabase.rpc('cancel_ride_before_accept', { 
-          p_ride_id: ride.id,
-          p_idempotency_key: idempotencyKey
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.rpc('process_rider_cancellation', { 
-          p_ride_id: ride.id,
-          p_idempotency_key: idempotencyKey
-        });
-        if (error) throw error;
-      }
+      await cancelRide(ride.id, ride.status);
+      useAuthStore.getState().refreshBalance();
       navigate('/');
     } catch (err: any) {
-      alert(err.message || 'Cancellation failed');
-    } finally {
-      setCancelling(false);
+      if (err.message?.includes('Insufficient balance')) {
+        setShowInsufficientModal(true);
+      } else {
+        alert(err.message || 'Cancellation failed');
+      }
     }
   };
 
   const submitRating = async () => {
-    if (!id || rating === 0) return;
-    await supabase
-      .from('rides')
-      .update({ rider_rating: rating })
-      .eq('id', id);
+    if (!id || rating === 0 || !ride) return;
+    
+    try {
+      // Update rating
+      await supabase
+        .from('rides')
+        .update({ rider_rating: rating })
+        .eq('id', id);
+
+      // Issue #11: Referral System Rewards
+      // Check if this was the rider's first ride
+      const { count } = await supabase
+        .from('rides')
+        .select('*', { count: 'exact', head: true })
+        .eq('rider_id', ride.rider_id)
+        .eq('status', 'completed');
+
+      if (count === 1) { // This is the first completed ride (including this one)
+        const referrerId = localStorage.getItem('pending_referral_referrer');
+        if (referrerId) {
+          // Update referral status
+          await supabase
+            .from('referrals')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('referrer_id', referrerId)
+            .eq('referee_id', ride.rider_id);
+
+          // Reward Referrer (10 GoCoin)
+          const { error: r1 } = await supabase.rpc('adjust_gocoins', {
+            p_user_id: referrerId,
+            p_amount: 10,
+            p_description: 'Referral Bonus (Referrer)',
+            p_idempotency_key: crypto.randomUUID()
+          });
+
+          // Reward Referee (5 GoCoin)
+          const { error: r2 } = await supabase.rpc('adjust_gocoins', {
+            p_user_id: ride.rider_id,
+            p_amount: 5,
+            p_description: 'Referral Bonus (Welcome)',
+            p_idempotency_key: crypto.randomUUID()
+          });
+
+          if (!r1 && !r2) {
+             localStorage.removeItem('pending_referral_referrer');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Referral reward failed:', err);
+    }
+
     navigate('/');
   };
 
@@ -149,37 +189,45 @@ export default function RideTracking() {
     <div className="h-screen flex flex-col pt-4">
       <div className="flex-grow relative">
         <MapContainer 
-          center={[22.5726, 88.3639]} // Initial fallback
-          zoom={15} 
-          zoomControl={false}
-          className="w-full h-full"
+          {...({
+            center: [22.5726, 88.3639],
+            zoom: 15,
+            zoomControl: false,
+            className: "w-full h-full"
+          } as any)}
         >
           <ChangeView center={toLatLngTuple(driverLocation)} />
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            {...({
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+              url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            } as any)}
           />
           {/* PostGIS geometry needs parsing. Assuming standard lat/lng for visualization here */}
           {driverLocation && parsePoint(driverLocation) && (
             <Marker 
-              position={toLatLngTuple(driverLocation)} 
-              icon={L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', iconSize: [32, 32] })} 
+              {...({
+                position: toLatLngTuple(driverLocation),
+                icon: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', iconSize: [32, 32] })
+              } as any)} 
             />
           )}
 
           {ride && (
             <>
-              {parsePoint(ride.pickup_geometry) && <Marker position={toLatLngTuple(ride.pickup_geometry)} />}
-              {parsePoint(ride.dropoff_geometry) && <Marker position={toLatLngTuple(ride.dropoff_geometry)} />}
+              {parsePoint(ride.pickup_geometry) && <Marker {...({position: toLatLngTuple(ride.pickup_geometry)} as any)} />}
+              {parsePoint(ride.dropoff_geometry) && <Marker {...({position: toLatLngTuple(ride.dropoff_geometry)} as any)} />}
             </>
           )}
 
           {route && (
             <Polyline 
-              positions={route.geometry.coordinates.map(c => [c[1], c[0]])} 
-              color="#000000" 
-              weight={4} 
-              opacity={0.6} 
+              {...({
+                positions: route.geometry.coordinates.map(c => [c[1], c[0]]),
+                color: "#000000",
+                weight: 4,
+                opacity: 0.6
+              } as any)} 
             />
           )}
         </MapContainer>
@@ -226,7 +274,7 @@ export default function RideTracking() {
                     <div className="flex-grow">
                        <p className="font-black text-lg">{driver.full_name}</p>
                        <div className="flex items-center space-x-2">
-                          <p className="text-sm font-bold text-gray-500">{driver.driver_profile.vehicle_details.number}</p>
+                          <p className="text-sm font-bold text-gray-500">{driver.driver_profile.vehicle_number}</p>
                           <span className="text-gray-300">•</span>
                           <div className="flex items-center text-black font-bold text-xs bg-gray-100 px-2 py-0.5 rounded-full">
                             <Star size={12} className="fill-current mr-1" />
@@ -242,7 +290,7 @@ export default function RideTracking() {
                  </div>
                  <div className="flex items-center space-x-2 text-xs text-black border border-black p-3 rounded-2xl font-bold">
                     <Navigation size={14} className="fill-current" />
-                    <span>{driver.driver_profile.vehicle_details.color} {driver.driver_profile.vehicle_details.model} is on the way</span>
+                    <span>{driver.driver_profile.vehicle_color} {driver.driver_profile.vehicle_model} is on the way</span>
                  </div>
               </div>
             ) : (
@@ -255,15 +303,56 @@ export default function RideTracking() {
             <div className="flex space-x-3">
                <button 
                 onClick={handleCancel}
-                disabled={cancelling}
+                disabled={isLoading}
                 className="flex-grow py-4 bg-gray-100 text-gray-900 rounded-2xl font-black text-sm hover:bg-red-50 hover:text-red-600 transition-all disabled:opacity-50"
                >
-                 {cancelling ? 'Updating...' : 'Cancel Ride'}
+                 {isLoading ? 'Updating...' : 'Cancel Ride'}
                </button>
                <button className="p-4 bg-gray-100 text-black rounded-2xl border border-gray-200">
                   <AlertCircle size={20} />
                </button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Rating Screen */}
+      <AnimatePresence>
+        {showInsufficientModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white w-full max-w-sm rounded-[40px] p-8 text-center"
+            >
+              <div className="w-20 h-20 bg-red-50 rounded-3xl mx-auto flex items-center justify-center mb-6 border border-red-100">
+                <AlertCircle size={40} className="text-red-500" />
+              </div>
+              <h3 className="text-2xl font-black mb-2">Insufficient Balance</h3>
+              <p className="text-gray-400 text-sm mb-8 leading-relaxed">
+                You don't have enough balance to pay the cancellation fee. Please add money to continue.
+              </p>
+              
+              <div className="space-y-3">
+                <button 
+                  onClick={() => navigate('/wallet')}
+                  className="w-full py-4 bg-black text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-black/10 active:scale-95 transition-all"
+                >
+                  Add Money
+                </button>
+                <button 
+                  onClick={() => setShowInsufficientModal(false)}
+                  className="w-full py-4 bg-gray-50 text-gray-500 rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

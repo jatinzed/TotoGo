@@ -46,6 +46,7 @@ export default function WalletPage() {
         p_metadata: { source: 'mock_topup' }
       });
       if (error) throw error;
+      useAuthStore.getState().refreshBalance();
       await fetchWalletData();
     } catch (err: any) {
       alert(err.message);

@@ -6,6 +6,8 @@ import { cn } from '../../utils/format';
 import { motion } from 'motion/react';
 import { Car } from 'lucide-react';
 
+import { supabase } from '../../lib/supabase/client';
+
 export default function Signup() {
   const [searchParams] = useSearchParams();
   const initialRole = searchParams.get('role') === 'driver' ? 'driver' : 'rider';
@@ -14,6 +16,8 @@ export default function Signup() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleColor, setVehicleColor] = useState('');
   const [role, setRole] = useState<'rider' | 'driver'>(initialRole);
   const [error, setError] = useState('');
   const { signUp } = useAuthStore();
@@ -22,7 +26,29 @@ export default function Signup() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await signUp(email, password, fullName, phone, role);
+      const data = await signUp(email, password, fullName, phone, role, vehicleModel, vehicleColor);
+      const user = data?.user;
+
+      if (user) {
+        const refCode = searchParams.get('ref');
+        if (refCode && role === 'rider') {
+          const { data: referrer } = await supabase
+            .from('users')
+            .select('id')
+            .filter('id', 'ilike', `${refCode}%`)
+            .single();
+
+          if (referrer) {
+            await supabase.from('referrals').insert({
+              referrer_id: referrer.id,
+              referee_id: user.id,
+              status: 'pending'
+            });
+            localStorage.setItem('pending_referral_referrer', referrer.id);
+          }
+        }
+      }
+
       navigate('/');
     } catch (err: any) {
       setError(err.message || 'Failed to sign up');
@@ -104,6 +130,37 @@ export default function Signup() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+
+            {role === 'driver' && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Vehicle Model</label>
+                  <input
+                    type="text"
+                    required={role === 'driver'}
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:ring-black focus:border-black sm:text-sm"
+                    placeholder="e.g. Bajaj RE"
+                    value={vehicleModel}
+                    onChange={(e) => setVehicleModel(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Vehicle Color</label>
+                  <input
+                    type="text"
+                    required={role === 'driver'}
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:ring-black focus:border-black sm:text-sm"
+                    placeholder="e.g. Green"
+                    value={vehicleColor}
+                    onChange={(e) => setVehicleColor(e.target.value)}
+                  />
+                </div>
+              </motion.div>
+            )}
 
             <div className="pt-2">
               <motion.button

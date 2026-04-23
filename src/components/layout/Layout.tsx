@@ -2,6 +2,7 @@ import React from 'react';
 import { Home, History, Wallet, User, Trophy, LayoutDashboard } from 'lucide-react';
 import { cn } from '../../utils/format';
 import { NavLink } from 'react-router-dom';
+import NotificationCenter from '../common/NotificationCenter';
 
 export function Layout({ children, showNav = true, isDriver = false }: { children: React.ReactNode, showNav?: boolean, isDriver?: boolean }) {
   const navItems = isDriver 
@@ -20,7 +21,12 @@ export function Layout({ children, showNav = true, isDriver = false }: { childre
 
   return (
     <div className="min-h-screen bg-white pb-20">
-      <div className="max-w-md mx-auto min-h-screen flex flex-col">
+      <div className="max-w-md mx-auto min-h-screen flex flex-col relative">
+        {/* Floating Notification Center */}
+        <div className="absolute top-6 right-6 z-40">
+           <NotificationCenter />
+        </div>
+
         <main className="flex-grow">
           {children}
         </main>

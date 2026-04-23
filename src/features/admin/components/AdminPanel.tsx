@@ -1,24 +1,36 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { useAuthStore } from '../../common/stores/authStore';
-import { formatCurrency } from '../../../utils/format';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Car, AlertCircle, Check, X, Shield, Search, Wallet, Loader2, ArrowLeft } from 'lucide-react';
+import { 
+  Users, Car, AlertCircle, Check, X, Shield, Search, Wallet, 
+  Loader2, ArrowLeft, Trash2, MessageSquare, LayoutDashboard, 
+  Settings, History, IndianRupee, Map as MapIcon, LogOut, Navigation
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../../../components/common/Logo';
 import { cn } from '../../../utils/format';
 
-export default function AdminPanel() {
-  const { profile } = useAuthStore();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'drivers' | 'rides' | 'complaints' | 'wallet'>('drivers');
-  const [drivers, setDrivers] = useState<any[]>([]);
-  const [rides, setRides] = useState<any[]>([]);
-  const [complaints, setComplaints] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+// Sub-components
+import DashboardStats from './DashboardStats';
+import DriverManagement from './DriverManagement';
+import RiderManagement from './RiderManagement';
+import RideManagement from './RideManagement';
+import ComplaintsManagement from './ComplaintsManagement';
+import FinancialManagement from './FinancialManagement';
+import MarketingManagement from './MarketingManagement';
+import SettingsManagement from './SettingsManagement';
 
-  // Re-verify admin access
-  const isAdmin = profile?.email === 'comrade.jotinmoy.010@proton.me';
+type AdminTab = 'dashboard' | 'drivers' | 'riders' | 'rides' | 'complaints' | 'finance' | 'marketing' | 'settings' | 'audit' | 'map';
+
+export default function AdminPanel() {
+  const { profile, signOut } = useAuthStore();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const [loading, setLoading] = useState(false);
+
+  // Verification
+  const isAdmin = profile?.role === 'admin';
 
   useEffect(() => {
     if (!profile) return;
@@ -26,272 +38,250 @@ export default function AdminPanel() {
        navigate('/');
        return;
     }
-    fetchData();
-  }, [profile, activeTab]);
+  }, [profile]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    if (activeTab === 'drivers') {
-      const { data } = await supabase
-        .from('driver_profiles')
-        .select('*, user:users(*), documents:driver_documents(*)');
-      setDrivers(data || []);
-    } else if (activeTab === 'rides') {
-      const { data } = await supabase
-        .from('rides')
-        .select('*, rider:users!rider_id(*), driver:users!driver_id(*)')
-        .order('requested_at', { ascending: false })
-        .limit(50);
-      setRides(data || []);
-    } else if (activeTab === 'complaints') {
-      const { data } = await supabase.from('complaints').select('*, user:users(*)');
-      setComplaints(data || []);
+  // Shared state for modals
+  const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<any>(null);
+  const [docUrls, setDocUrls] = useState<Record<string, string>>({});
+  const [loadingDocs, setLoadingDocs] = useState(false);
+
+  const viewDocuments = async (driver: any) => {
+    setSelectedDriverForDocs(driver);
+    setLoadingDocs(true);
+    const urls: Record<string, string> = {};
+    
+    for (const doc of driver.documents || []) {
+       if (doc.file_url) {
+          const { data } = await supabase.storage
+            .from('driver-docs')
+            .createSignedUrl(doc.file_url, 3600);
+          if (data) urls[doc.id] = data.signedUrl;
+       }
     }
-    setLoading(false);
+    
+    setDocUrls(urls);
+    setLoadingDocs(false);
   };
 
-  const handleVerifyDriver = async (userId: string, isVerified: boolean) => {
-    await supabase
-      .from('driver_profiles')
-      .update({ is_verified: isVerified, verification_status: isVerified ? 'verified' : 'rejected' })
-      .eq('user_id', userId);
-    fetchData();
-  };
+  const handleVerifyDriverInModal = async (userId: string, isVerified: boolean) => {
+     const { error } = await supabase
+       .from('driver_profiles')
+       .update({ is_verified: isVerified, verification_status: isVerified ? 'verified' : 'rejected' })
+       .eq('user_id', userId);
 
-  const [creditEmail, setCreditEmail] = useState('');
-  const [creditAmount, setCreditAmount] = useState('');
-  const [creditReason, setCreditReason] = useState('');
-  const [crediting, setCrediting] = useState(false);
-
-  const handleManualCredit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCrediting(true);
-    try {
-      // Find user by email
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', creditEmail)
-        .single();
-      
-      if (userError) throw new Error('User not found');
-
-      const { error } = await supabase.rpc('credit_wallet', {
-        p_user_id: userData.id,
-        p_amount: parseInt(creditAmount) * 100,
-        p_type: 'manual_adjustment',
-        p_description: creditReason || 'Admin manual credit',
-        p_idempotency_key: `admin_${Date.now()}`,
-        p_metadata: { admin_email: profile?.email }
-      });
-
-      if (error) throw error;
-      alert('Wallet credited successfully');
-      setCreditEmail('');
-      setCreditAmount('');
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setCrediting(false);
-    }
+     if (!error) {
+       setSelectedDriverForDocs(null);
+       // We'd ideally want to refresh the DriverManagement list here,
+       // but for simplicity we'll just close the modal.
+       alert('Driver status updated');
+     } else {
+       alert(error.message);
+     }
   };
 
   if (!isAdmin) return null;
 
+  const NAV_ITEMS = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'drivers', label: 'Drivers', icon: SteerIcon },
+    { id: 'riders', label: 'Riders', icon: Users },
+    { id: 'rides', label: 'Trips', icon: Car },
+    { id: 'complaints', label: 'Support', icon: MessageSquare },
+    { id: 'finance', label: 'Earnings', icon: IndianRupee },
+    { id: 'marketing', label: 'Marketing', icon: Zap },
+    { id: 'map', label: 'Live Map', icon: MapIcon },
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'audit', label: 'Logs', icon: History },
+  ];
+
+  function Zap({ size, className }: any) {
+    return <AlertCircle size={size} className={className} />; // Placeholder icon if Zap not imported
+  }
+
+  function SteerIcon({ size, className }: any) {
+    return <Navigation size={size} className={cn("rotate-45", className)} />;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row overflow-hidden">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row overflow-hidden font-sans">
       {/* Desktop Sidebar */}
-      <aside className="w-full md:w-64 bg-black text-white p-6 flex flex-col shrink-0">
-        <div className="flex items-center space-x-3 mb-10">
-           <button onClick={() => navigate('/')} className="p-2 hover:bg-white/10 rounded-lg">
-              <ArrowLeft size={20} />
-           </button>
-           <div className="flex items-center space-x-2">
-              <Logo className="h-5 text-white" />
-              <span className="text-xl font-black tracking-tight border-l border-white/20 pl-3">Admin</span>
+      <aside className="w-full md:w-72 bg-black text-white p-8 flex flex-col shrink-0">
+        <div className="flex items-center justify-between mb-12">
+           <div className="flex items-center space-x-3">
+              <Logo className="h-6 text-white" />
+              <div className="h-6 w-px bg-white/20" />
+              <span className="text-sm font-black tracking-widest uppercase">Admin</span>
            </div>
+           <button 
+             onClick={() => navigate('/')}
+             className="p-2 hover:bg-white/10 rounded-xl text-white/40 hover:text-white transition-all"
+           >
+              <ArrowLeft size={18} />
+           </button>
         </div>
 
-        <nav className="space-y-2 flex-grow">
-          {[
-            { id: 'drivers', label: 'Drivers', icon: Users },
-            { id: 'rides', label: 'Rides', icon: Car },
-            { id: 'complaints', label: 'Complaints', icon: AlertCircle },
-            { id: 'wallet', label: 'Finance', icon: Wallet },
-          ].map(tab => (
+        <nav className="space-y-1.5 flex-grow overflow-y-auto pr-2 custom-scrollbar">
+          {NAV_ITEMS.map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as AdminTab)}
               className={cn(
-                "w-full flex items-center space-x-3 p-4 rounded-2xl text-sm font-bold transition-all",
-                activeTab === tab.id ? "bg-white text-black shadow-lg" : "text-white/40 hover:text-white"
+                "w-full flex items-center space-x-3 p-4 rounded-2xl text-sm font-bold transition-all group relative",
+                activeTab === tab.id ? "bg-white text-black shadow-lg" : "text-white/40 hover:text-white hover:bg-white/5"
               )}
             >
-              <tab.icon size={20} />
+              <tab.icon size={18} className={cn(activeTab === tab.id ? "text-black" : "text-white/20 group-hover:text-white")} />
               <span>{tab.label}</span>
+              {activeTab === tab.id && (
+                <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-black rounded-full" />
+              )}
             </button>
           ))}
         </nav>
 
-        <div className="mt-10 p-4 bg-white/5 rounded-2xl border border-white/5">
-           <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-2">Logged in as</p>
-           <p className="text-xs font-bold truncate">{profile?.email}</p>
+        <div className="mt-8 pt-8 border-t border-white/10 space-y-4">
+           <div className="flex items-center space-x-3 px-4">
+              <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center font-black text-white/30">
+                 {profile?.full_name?.[0]}
+              </div>
+              <div className="flex-grow min-w-0">
+                 <p className="text-xs font-black truncate">{profile?.full_name}</p>
+                 <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest truncate">{profile?.email}</p>
+              </div>
+           </div>
+           <button 
+            onClick={signOut}
+            className="w-full flex items-center space-x-3 p-4 rounded-2xl text-sm font-bold text-red-400 hover:bg-red-500/10 transition-all"
+           >
+              <LogOut size={18} />
+              <span>Sign Out</span>
+           </button>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-grow p-8 overflow-y-auto">
-        <header className="flex justify-between items-center mb-10">
-           <h2 className="text-3xl font-black capitalize">{activeTab} Management</h2>
-           <div className="flex items-center space-x-2 bg-white border border-gray-100 p-2 rounded-xl shadow-sm">
-              <Search className="text-gray-300 ml-2" size={18} />
-              <input type="text" placeholder="Search..." className="bg-transparent border-none focus:ring-0 text-sm w-48" />
-           </div>
+      <main className="flex-grow p-10 overflow-y-auto bg-gray-50/50">
+        <header className="mb-12">
+           <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2 px-1">Management Portal</p>
+           <h2 className="text-4xl font-black capitalize tracking-tight text-gray-900">{activeTab.replace('_', ' ')}</h2>
         </header>
 
-        {loading ? (
-           <div className="h-64 flex items-center justify-center">
-              <Loader2 className="animate-spin text-gray-200" size={48} />
-           </div>
-        ) : (
+        <div className="min-h-[600px]">
            <AnimatePresence mode="wait">
-              {activeTab === 'drivers' && (
-                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                    {drivers.map(driver => (
-                       <div key={driver.user_id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex items-center justify-between group hover:shadow-md transition-all">
-                          <div className="flex items-center space-x-6">
-                             <div className="w-16 h-16 bg-gray-100 rounded-2xl overflow-hidden ring-4 ring-gray-50 uppercase font-black text-gray-300 flex items-center justify-center">
-                                {driver.user?.full_name?.[0]}
-                             </div>
-                             <div>
-                                <h4 className="font-black text-lg">{driver.user?.full_name}</h4>
-                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">{driver.vehicle_details?.number} • {driver.vehicle_details?.model}</p>
-                             </div>
-                          </div>
-                          
-                          <div className="flex items-center space-x-8">
-                             <div className="text-center">
-                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
-                                <span className={cn(
-                                   "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                                   driver.is_verified ? "bg-green-50 text-green-600" : "bg-orange-50 text-orange-600"
-                                )}>
-                                   {driver.verification_status}
-                                </span>
-                             </div>
-
-                             <div className="flex space-x-2">
-                                <button 
-                                 onClick={() => handleVerifyDriver(driver.user_id, true)}
-                                 className="p-3 bg-green-50 text-green-600 rounded-xl hover:bg-green-500 hover:text-white transition-all shadow-sm"
-                                >
-                                   <Check size={20} />
-                                </button>
-                                <button 
-                                 onClick={() => handleVerifyDriver(driver.user_id, false)}
-                                 className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
-                                >
-                                   <X size={20} />
-                                </button>
-                             </div>
-                          </div>
-                       </div>
-                    ))}
-                 </motion.div>
-              )}
-
-              {activeTab === 'rides' && (
-                 <div className="bg-white rounded-[32px] border border-gray-100 overflow-hidden shadow-sm shadow-black/5">
-                    <table className="w-full text-left">
-                       <thead className="bg-gray-50 border-b border-gray-100">
-                          <tr>
-                             <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Rider / Driver</th>
-                             <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Route</th>
-                             <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Fare</th>
-                             <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                          </tr>
-                       </thead>
-                       <tbody className="divide-y divide-gray-50">
-                          {rides.map(ride => (
-                             <tr key={ride.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-6 py-6">
-                                   <p className="font-bold text-sm">{ride.rider?.full_name}</p>
-                                   <p className="text-[10px] text-gray-400 font-bold truncate max-w-[120px]">{ride.driver?.full_name || 'Unassigned'}</p>
-                                </td>
-                                <td className="px-6 py-6">
-                                   <p className="text-xs text-gray-500 truncate max-w-[200px]">{ride.pickup_address} → {ride.dropoff_address}</p>
-                                </td>
-                                <td className="px-6 py-6">
-                                   <p className="font-black text-sm">{formatCurrency(ride.fare)}</p>
-                                </td>
-                                <td className="px-6 py-6">
-                                   <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 bg-gray-100 rounded-lg">{ride.status}</span>
-                                </td>
-                             </tr>
-                          ))}
-                       </tbody>
-                    </table>
-                 </div>
-              )}
-
-              {activeTab === 'wallet' && (
-                 <div className="max-w-xl mx-auto">
-                    <div className="bg-white p-10 rounded-[40px] border border-gray-100 shadow-2xl">
-                       <div className="w-20 h-20 bg-blue-50 rounded-[32px] flex items-center justify-center mb-8 mx-auto border border-blue-100">
-                          <Wallet className="text-blue-500" size={32} />
-                       </div>
-                       <h3 className="text-2xl font-black text-center mb-2">Manual Wallet Credit</h3>
-                       <p className="text-gray-400 font-medium text-center text-sm mb-10 leading-relaxed">
-                          Use this form to adjust user balances for compensation, refunds or penalties.
-                       </p>
-                       
-                       <form onSubmit={handleManualCredit} className="space-y-6">
-                          <div>
-                             <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">User Email</label>
-                             <input 
-                              type="email" 
-                              required
-                              value={creditEmail}
-                              onChange={(e) => setCreditEmail(e.target.value)}
-                              className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-black transition-all"
-                              placeholder="e.g. jatin@totogo.app"
-                             />
-                          </div>
-                          <div>
-                             <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Amount (₹)</label>
-                             <input 
-                              type="number" 
-                              required
-                              value={creditAmount}
-                              onChange={(e) => setCreditAmount(e.target.value)}
-                              className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-black transition-all"
-                              placeholder="e.g. 50"
-                             />
-                          </div>
-                          <div>
-                             <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Reason</label>
-                             <textarea 
-                              required
-                              value={creditReason}
-                              onChange={(e) => setCreditReason(e.target.value)}
-                              className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-black transition-all resize-none h-24"
-                              placeholder="Describe why you are adding this credit..."
-                             />
-                          </div>
-                          
-                          <button 
-                           disabled={crediting}
-                           className="w-full py-5 bg-black text-white rounded-[24px] font-black text-sm uppercase tracking-widest active:scale-[0.98] transition-all flex items-center justify-center space-x-2"
-                          >
-                             {crediting ? <Loader2 className="animate-spin" /> : <span>Authorize Credit</span>}
-                          </button>
-                       </form>
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                 {activeTab === 'dashboard' && <DashboardStats />}
+                 {activeTab === 'drivers' && <DriverManagement onViewDocs={viewDocuments} />}
+                 {activeTab === 'riders' && <RiderManagement />}
+                 {activeTab === 'rides' && <RideManagement />}
+                 {activeTab === 'complaints' && <ComplaintsManagement />}
+                 {activeTab === 'finance' && <FinancialManagement />}
+                 {activeTab === 'marketing' && <MarketingManagement />}
+                 {activeTab === 'settings' && <SettingsManagement />}
+                 {activeTab === 'audit' && (
+                    <div className="bg-white p-20 rounded-[40px] text-center border border-gray-100 italic text-gray-400">
+                       <History className="mx-auto mb-4 opacity-10" size={64} />
+                       <p>Audit logs coming soon.</p>
                     </div>
-                 </div>
-              )}
+                 )}
+                 {activeTab === 'map' && (
+                    <div className="bg-white p-20 rounded-[40px] text-center border border-gray-100 italic text-gray-400">
+                       <MapIcon className="mx-auto mb-4 opacity-10" size={64} />
+                       <p>Live driver monitoring coming soon.</p>
+                    </div>
+                 )}
+              </motion.div>
            </AnimatePresence>
-        )}
+        </div>
       </main>
+
+      {/* Document Preview Modal */}
+      <AnimatePresence>
+         {selectedDriverForDocs && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[3000] flex items-center justify-center p-6"
+            >
+               <motion.div 
+                 initial={{ scale: 0.9, y: 20 }}
+                 animate={{ scale: 1, y: 0 }}
+                 exit={{ scale: 0.9, y: 20 }}
+                 className="bg-white w-full max-w-2xl rounded-[40px] overflow-hidden flex flex-col max-h-[90vh]"
+               >
+                  <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+                     <div>
+                        <h3 className="text-2xl font-black">{selectedDriverForDocs.user?.full_name}'s Documents</h3>
+                        <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">{selectedDriverForDocs.vehicle_number} • {selectedDriverForDocs.vehicle_model}</p>
+                     </div>
+                     <button onClick={() => setSelectedDriverForDocs(null)} className="p-3 hover:bg-gray-100 rounded-2xl transition-all">
+                        <X size={24} />
+                     </button>
+                  </div>
+                  
+                  <div className="flex-grow overflow-y-auto p-8 space-y-8">
+                     {loadingDocs ? (
+                        <div className="flex flex-col items-center justify-center py-20">
+                           <Loader2 className="animate-spin text-gray-200 mb-4" size={48} />
+                           <p className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Generating Secure Links...</p>
+                        </div>
+                     ) : selectedDriverForDocs.documents?.length === 0 ? (
+                        <div className="text-center py-20 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200">
+                           <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">No documents uploaded</p>
+                        </div>
+                     ) : (
+                        <div className="grid grid-cols-1 gap-8">
+                           {selectedDriverForDocs.documents?.map((doc: any) => (
+                              <div key={doc.id} className="space-y-3">
+                                 <div className="flex items-center justify-between px-2">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">{doc.document_type.replace('_', ' ')}</p>
+                                    <a 
+                                     href={docUrls[doc.id]} 
+                                     target="_blank" 
+                                     referrerPolicy="no-referrer"
+                                     className="text-[10px] font-black uppercase tracking-widest text-blue-500 hover:underline"
+                                    >
+                                       Open Full View
+                                    </a>
+                                 </div>
+                                 <div className="bg-gray-100 rounded-[32px] overflow-hidden border border-gray-200">
+                                    <img 
+                                     src={docUrls[doc.id]} 
+                                     alt={doc.document_type} 
+                                     className="w-full h-auto object-contain max-h-[400px]"
+                                     referrerPolicy="no-referrer"
+                                    />
+                                 </div>
+                              </div>
+                           ))}
+                        </div>
+                     )}
+                  </div>
+
+                  <div className="p-8 bg-gray-50 flex space-x-4">
+                     <button 
+                       onClick={() => handleVerifyDriverInModal(selectedDriverForDocs.user_id, true)}
+                       className="flex-grow py-4 bg-green-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-green-200 active:scale-95 transition-all"
+                     >
+                        Approve Driver
+                     </button>
+                     <button 
+                       onClick={() => handleVerifyDriverInModal(selectedDriverForDocs.user_id, false)}
+                       className="flex-grow py-4 bg-white border border-red-100 text-red-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-50 active:scale-95 transition-all"
+                     >
+                        Reject
+                     </button>
+                  </div>
+               </motion.div>
+            </motion.div>
+         )}
+      </AnimatePresence>
     </div>
   );
 }

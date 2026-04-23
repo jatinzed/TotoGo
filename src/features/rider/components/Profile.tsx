@@ -1,14 +1,52 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../../common/stores/authStore';
 import { supabase } from '../../../lib/supabase/client';
-import { motion } from 'motion/react';
-import { User, Phone, Mail, LogOut, ChevronRight, Share2, Shield, Settings } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { User, Phone, Mail, LogOut, ChevronRight, Share2, Shield, Settings, Camera, Loader2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import ComplaintForm from './ComplaintForm';
 
 export default function ProfilePage() {
-  const { profile, signOut } = useAuthStore();
+  const { profile, signOut, refreshProfile } = useAuthStore();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showComplaintForm, setShowComplaintForm] = useState(false);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+
+    setUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${profile.id}/${Date.now()}.${fileExt}`;
+      const filePath = fileName;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ avatar_url: publicUrl })
+        .eq('id', profile.id);
+
+      if (updateError) throw updateError;
+      
+      await refreshProfile();
+    } catch (err: any) {
+      alert(err.message || 'Error uploading avatar');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -30,8 +68,23 @@ export default function ProfilePage() {
   return (
     <div className="p-6 space-y-8 pb-32">
       <header className="flex items-center space-x-6 mb-10">
-        <div className="w-24 h-24 bg-gray-200 rounded-[32px] overflow-hidden border-4 border-white shadow-xl">
-           <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.id}`} alt="Avatar" />
+        <div className="relative group">
+          <div className="w-24 h-24 bg-gray-200 rounded-[32px] overflow-hidden border-4 border-white shadow-xl relative">
+            {profile?.avatar_url ? (
+               <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.id}`} alt="Avatar" />
+            )}
+            {uploading && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <Loader2 className="animate-spin text-white" size={24} />
+              </div>
+            )}
+          </div>
+          <label className="absolute -bottom-2 -right-2 bg-black text-white p-2 rounded-xl shadow-lg cursor-pointer hover:scale-110 transition-all">
+            <Camera size={16} />
+            <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} disabled={uploading} />
+          </label>
         </div>
         <div>
            <h1 className="text-2xl font-black">{profile?.full_name}</h1>
@@ -81,6 +134,13 @@ export default function ProfilePage() {
               </div>
               <ChevronRight size={16} className="text-gray-300" />
            </div>
+           <div className="p-5 flex items-center space-x-4 hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setShowComplaintForm(true)}>
+              <AlertCircle className="text-gray-400 group-hover:text-black" size={20} />
+              <div className="flex-grow">
+                 <p className="text-sm font-bold">File a Complaint</p>
+              </div>
+              <ChevronRight size={16} className="text-gray-300" />
+           </div>
         </div>
       </div>
 
@@ -112,6 +172,12 @@ export default function ProfilePage() {
         <LogOut size={16} />
         <span>Sign Out</span>
       </button>
+
+      <AnimatePresence>
+        {showComplaintForm && (
+          <ComplaintForm onClose={() => setShowComplaintForm(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

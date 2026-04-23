@@ -13,7 +13,8 @@ export interface UserProfile {
 }
 
 export interface DriverProfile {
-  id: string; // FK to users
+  id: string; // Internal PK
+  user_id: string; // FK to users
   driver_license_number?: string;
   vehicle_number: string;
   vehicle_model: string;
@@ -23,6 +24,7 @@ export interface DriverProfile {
   total_rides: number;
   average_rating: number;
   online_status: boolean;
+  is_busy: boolean;
   location?: any; // PostGIS POINT
   last_location_update?: string;
 }
@@ -40,6 +42,12 @@ export interface Ride {
   id: string;
   rider_id: string;
   driver_id?: string;
+  driver?: {
+    id: string;
+    full_name: string;
+    phone: string;
+    driver_profile?: DriverProfile;
+  };
   pickup_geometry: any;
   pickup_address: string;
   dropoff_geometry: any;
@@ -58,6 +66,15 @@ export interface Ride {
   driver_rating?: number;
   rider_comment?: string;
   driver_comment?: string;
+}
+
+export interface DriverDocument {
+  id: string;
+  driver_id: string;
+  document_type: string;
+  file_url: string;
+  verification_status: 'pending' | 'verified' | 'rejected';
+  created_at: string;
 }
 
 export interface UserWallet {

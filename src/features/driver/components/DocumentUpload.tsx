@@ -44,7 +44,7 @@ export default function DriverDocuments() {
         .insert({
           driver_id: profile.id,
           document_type: type,
-          document_url: path,
+          file_url: path,
           verification_status: 'pending'
         });
 

@@ -7,6 +7,7 @@ import { useGeolocation } from '../../hooks/useGeolocation';
 import { useRouting, RouteData } from '../../lib/maps/routing';
 import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../features/common/stores/authStore';
+import { useRideStore } from '../../features/common/stores/rideStore';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../common/Logo';
 import { ChangeView } from '../common/ChangeView';
@@ -29,6 +30,7 @@ function MapEvents({ onMove }: { onMove: (pos: { lat: number, lng: number }) => 
 export default function MapPicker({ onClose }: MapPickerProps) {
   const { location: userLocation } = useGeolocation();
   const { profile } = useAuthStore();
+  const { dispatchRide, error: rideError } = useRideStore();
   const navigate = useNavigate();
   const { getRoute, loading: routingLoading } = useRouting();
   
@@ -39,6 +41,8 @@ export default function MapPicker({ onClose }: MapPickerProps) {
   const [booking, setBooking] = useState(false);
   const [fare, setFare] = useState(0);
   const [route, setRoute] = useState<RouteData | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'wallet'>('cash');
+  const lastClickRef = React.useRef<number>(0);
 
   useEffect(() => {
     if (userLocation && !pickup) {
@@ -71,22 +75,34 @@ export default function MapPicker({ onClose }: MapPickerProps) {
   };
 
   const calculateFare = (distanceInMeters: number) => {
-     const distKm = distanceInMeters / 1000;
-     const base = 40;
-     const rate = 15;
-     setFare(Math.round(base + (distKm * rate)));
+     // Fare: ₹5 for first 500m, ₹0.5 per 100m after
+     const base = 5;
+     const baseDistance = 500;
+     if (distanceInMeters <= baseDistance) {
+       setFare(base);
+     } else {
+       const extraDistance = distanceInMeters - baseDistance;
+       const extraPrice = Math.ceil(extraDistance / 100) * 0.5;
+       setFare(Math.round(base + extraPrice));
+     }
   };
 
   const calculateFareFallback = (p: any, d: any) => {
-     // Simple distance-based calculation (as placeholder)
-     const dist = Math.sqrt(Math.pow(p.lat - d.lat, 2) + Math.pow(p.lng - d.lng, 2)) * 111; // rough km
-     const base = 40;
-     const rate = 15;
-     setFare(Math.round(base + (dist * rate)));
+     const distMeters = Math.sqrt(Math.pow(p.lat - d.lat, 2) + Math.pow(p.lng - d.lng, 2)) * 111000;
+     calculateFare(distMeters);
   };
 
   const handleBookRide = async () => {
     if (!pickup || !dropoff || !profile) return;
+    
+    // Issue #27: Rate limiting / Debounce (3 seconds)
+    const now = Date.now();
+    if (now - lastClickRef.current < 3000) return;
+    lastClickRef.current = now;
+
+    // Issue #27: prevent multiple concurrent requests
+    if (booking) return;
+
     setBooking(true);
     try {
       // 1. Create Ride Record
@@ -99,8 +115,8 @@ export default function MapPicker({ onClose }: MapPickerProps) {
           dropoff_address: dropoff.address,
           pickup_geometry: `POINT(${pickup.lng} ${pickup.lat})`,
           dropoff_geometry: `POINT(${dropoff.lng} ${dropoff.lat})`,
-          fare: fare, // assuming fare in rupees for now as per "calculated based on distance"
-          payment_method: 'cash',
+          fare: fare,
+          payment_method: paymentMethod, // Issue #26: Use dynamic payment method
           payment_status: 'pending'
         })
         .select()
@@ -108,13 +124,23 @@ export default function MapPicker({ onClose }: MapPickerProps) {
 
       if (createError) throw createError;
 
-      // Note: New instructions imply drivers listen for 'requested' rides and accept them manually.
-      // No dispatch RPC mentioned in the latest function list.
+      // 2. Dispatch Nearest Driver via RPC
+      const { data: result, error: rpcError } = await supabase.rpc('dispatch_nearest_driver', { 
+        p_ride_id: ride.id 
+      });
+      
+      if (rpcError) {
+        throw rpcError;
+      }
 
-      navigate(`/ride/${ride.id}`);
-      onClose();
+      if (result) {
+        navigate(`/ride/${ride.id}`);
+        onClose();
+      } else {
+        throw new Error('No available drivers found in your area. Please try again.');
+      }
     } catch (err: any) {
-      alert(err.message || 'Failed to book ride');
+      alert(err.message || 'Failed to find a driver. Try again?');
     } finally {
       setBooking(false);
     }
@@ -145,15 +171,19 @@ export default function MapPicker({ onClose }: MapPickerProps) {
       {/* Map Content */}
       <div className="flex-grow relative bg-gray-100">
         <MapContainer 
-          center={currentCenter ? [currentCenter.lat, currentCenter.lng] : [22.5726, 88.3639]} 
-          zoom={15} 
-          zoomControl={false}
-          className="w-full h-full"
+          {...({
+            center: [22.5726, 88.3639],
+            zoom: 15,
+            zoomControl: false,
+            className: "w-full h-full"
+          } as any)}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maxZoom={19}
+            {...({
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+              url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+              maxZoom: 19
+            } as any)}
           />
           <ChangeView center={toLatLngTuple(currentCenter)} />
           {step !== 'confirm' && <MapEvents onMove={setCurrentCenter} />}
@@ -169,15 +199,17 @@ export default function MapPicker({ onClose }: MapPickerProps) {
           )}
 
           {/* Actual Markers after selection */}
-          {pickup && <Marker position={[pickup.lat, pickup.lng]} icon={L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [25, 41], iconAnchor: [12, 41] })} />}
-          {dropoff && <Marker position={[dropoff.lat, dropoff.lng]} icon={L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [25, 41], iconAnchor: [12, 41] })} />}
+          {pickup && <Marker {...({position: [pickup.lat, pickup.lng], icon: L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [25, 41], iconAnchor: [12, 41] })})} />}
+          {dropoff && <Marker {...({position: [dropoff.lat, dropoff.lng], icon: L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [25, 41], iconAnchor: [12, 41] })})} />}
           
           {route && (
             <Polyline 
-              positions={route.geometry.coordinates.map(c => [c[1], c[0]])} 
-              color="#000000" 
-              weight={4} 
-              opacity={0.6} 
+              {...({
+                positions: route.geometry.coordinates.map(c => [c[1], c[0]]),
+                color: "#000000",
+                weight: 4,
+                opacity: 0.6
+              } as any)} 
             />
           )}
         </MapContainer>
@@ -194,7 +226,10 @@ export default function MapPicker({ onClose }: MapPickerProps) {
       </div>
 
       {/* Action Footer */}
-      <div className="p-6 bg-white border-t border-gray-100 rounded-t-[32px] -mt-8 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+      <div className={cn(
+        "bg-white border-t border-gray-100 rounded-t-[32px] -mt-8 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]",
+        step === 'confirm' ? "p-6" : "p-6 pb-12"
+      )}>
         {step === 'confirm' ? (
           <div className="space-y-6">
             <div className="space-y-3">
@@ -222,19 +257,49 @@ export default function MapPicker({ onClose }: MapPickerProps) {
                <p className="text-xl font-black">₹{fare}</p>
             </div>
 
+            {/* Issue #26: Payment Method Toggle */}
+            <div className="flex items-center justify-between bg-gray-50 p-2 rounded-2xl border border-gray-100">
+               <button 
+                onClick={() => setPaymentMethod('cash')}
+                className={cn(
+                  "flex-grow py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  paymentMethod === 'cash' ? "bg-white text-black shadow-sm" : "text-gray-400"
+                )}
+               >
+                 Pay Cash
+               </button>
+               <button 
+                onClick={() => setPaymentMethod('wallet')}
+                className={cn(
+                  "flex-grow py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  paymentMethod === 'wallet' ? "bg-white text-black shadow-sm" : "text-gray-400"
+                )}
+               >
+                 Pay Wallet
+               </button>
+            </div>
+
             <motion.button
               whileTap={{ scale: 0.98 }}
               disabled={booking}
               onClick={handleBookRide}
               className="w-full py-4 bg-black text-white rounded-2xl font-bold flex items-center justify-center space-x-3 disabled:opacity-50"
             >
-              {booking ? <Loader2 className="animate-spin" /> : (
+              {booking ? (
                 <div className="flex items-center space-x-2">
-                  <span>Request</span>
+                  <Loader2 className="animate-spin" size={20} />
+                  <span>Finding nearest driver...</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <span>{rideError ? 'No drivers found - Retry' : 'Request Toto'}</span>
                   <Logo className="h-4 text-white" />
                 </div>
               )}
             </motion.button>
+            {rideError && (
+              <p className="text-red-500 text-[10px] text-center font-bold uppercase tracking-widest mt-2">{rideError}</p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col space-y-4">
