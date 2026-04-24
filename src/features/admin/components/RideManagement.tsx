@@ -47,10 +47,36 @@ export default function RideManagement() {
   };
 
   const filteredRides = rides.filter(r => 
-    r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.rider?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.driver?.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    r && (
+      r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.rider?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.driver?.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
+
+  const handleForceCancel = async () => {
+    if (!selectedRide) return;
+    const confirmText = `Are you sure you want to FORCE CANCEL this trip (${selectedRide.id.slice(0,8)})? This will refund the rider and release the driver.`;
+    if (!confirm(confirmText)) return;
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_force_cancel_ride', {
+        p_ride_id: selectedRide.id,
+        p_refund_percentage: 100
+      });
+
+      if (error) throw error;
+
+      alert(`Trip cancelled successfully. Refunded: ₹${data.refunded / 100}`);
+      setSelectedRide(null);
+      fetchRides();
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel trip');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -228,8 +254,12 @@ export default function RideManagement() {
                          )}
                       </div>
 
-                      <button className="w-full py-4 bg-red-50 text-red-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">
-                         Force Cancel Trip
+                      <button 
+                        onClick={handleForceCancel}
+                        disabled={loading || selectedRide.status.startsWith('cancelled') || selectedRide.status === 'completed'}
+                        className="w-full py-4 bg-red-50 text-red-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-500 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                         {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Force Cancel Trip'}
                       </button>
                    </div>
                 </div>

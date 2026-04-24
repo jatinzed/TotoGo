@@ -24,6 +24,8 @@ export default function DriverNavigation({ ride, driverProfile, onTripEnd }: Dri
   const { getRoute } = useRouting();
   const [route, setRoute] = useState<RouteData | null>(null);
   const [currentRide, setCurrentRide] = useState<Ride>(ride);
+  const [otpValue, setOtpValue] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     setCurrentRide(ride);
@@ -58,6 +60,108 @@ export default function DriverNavigation({ ride, driverProfile, onTripEnd }: Dri
       supabase.removeChannel(channel);
     };
   }, [currentRide.id]);
+
+  const handleVerifyStart = async () => {
+    if (!otpValue) return;
+    setIsVerifying(true);
+    try {
+      const { data, error } = await supabase.rpc('verify_start_otp', {
+        p_ride_id: currentRide.id,
+        p_otp: otpValue
+      });
+
+      if (error) throw error;
+      if (data?.status === 'ok') {
+        alert('OTP Verified! Trip started.');
+        setOtpValue('');
+      } else {
+        alert(data?.error || 'Invalid OTP');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleRequestEnd = async () => {
+    setIsVerifying(true);
+    try {
+      const { data, error } = await supabase.rpc('request_ride_completion', {
+        p_ride_id: currentRide.id
+      });
+      if (error) throw error;
+      if (data?.status === 'ok') {
+        alert('Completion OTP sent to rider. Please ask them for the code.');
+      } else {
+        alert(data?.error || 'Failed to request completion');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleVerifyEnd = async () => {
+    if (!otpValue) return;
+    setIsVerifying(true);
+    try {
+      const { data, error } = await supabase.rpc('complete_ride_with_otp', {
+        p_ride_id: currentRide.id,
+        p_otp: otpValue
+      });
+
+      if (error) throw error;
+      if (data?.status === 'ok') {
+        // Now call the final payment and notification logic (which was in handleAction('completed'))
+        await handlePaymentAndClose();
+      } else {
+        alert(data?.error || 'Invalid OTP');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handlePaymentAndClose = async () => {
+    // Original payment & notification logic from line 118+
+    try {
+      await supabase.rpc('debit_wallet', { 
+        p_user_id: currentRide.rider_id, 
+        p_amount: currentRide.fare, 
+        p_type: 'ride_payment', 
+        p_idempotency_key: crypto.randomUUID(), 
+        p_metadata: { ride_id: currentRide.id } 
+      });
+
+      await supabase.rpc('credit_wallet', { 
+        p_user_id: driverProfile.id, 
+        p_amount: Math.floor(currentRide.fare * 0.8), 
+        p_type: 'ride_earning', 
+        p_idempotency_key: crypto.randomUUID(), 
+        p_metadata: { ride_id: currentRide.id } 
+      });
+
+      await useAuthStore.getState().refreshBalance();
+      
+      await supabase.from('notifications').insert({
+        user_id: driverProfile.user_id,
+        title: "Ride Completed",
+        body: `Ride ended. You earned ₹${currentRide.fare}.`
+      });
+
+      await supabase.from('notifications').insert({
+        user_id: currentRide.rider_id,
+        title: "Ride Completed",
+        body: "Thank you for riding with TotoGo! Please rate your driver."
+      });
+    } catch (err) {
+      console.error('Payment processing failed:', err);
+    }
+  };
 
   const handleAction = async (newStatus: 'arrived' | 'started' | 'completed') => {
     const update: any = { status: newStatus };
@@ -124,7 +228,7 @@ export default function DriverNavigation({ ride, driverProfile, onTripEnd }: Dri
           });
 
           await supabase.rpc('credit_wallet', { 
-            p_user_id: useAuthStore.getState().profile?.id, 
+            p_user_id: driverProfile.id, 
             p_amount: Math.floor(currentRide.fare * 0.8), 
             p_type: 'ride_earning', 
             p_idempotency_key: crypto.randomUUID(), 
@@ -232,15 +336,28 @@ export default function DriverNavigation({ ride, driverProfile, onTripEnd }: Dri
         {currentRide.status === 'arrived' && (
           <div className="space-y-6 text-center py-4">
             <div className="w-20 h-20 bg-black rounded-[32px] mx-auto flex items-center justify-center mb-4">
-              <MapPin size={32} className="text-white animate-bounce" />
+              <CheckCircle2 size={32} className="text-white animate-bounce" />
             </div>
-            <h3 className="text-2xl font-black">Pickup the Rider</h3>
-            <p className="text-gray-400 text-sm font-medium">Verify the rider name and destination.</p>
+            <h3 className="text-2xl font-black">Verify Rider OTP</h3>
+            <p className="text-gray-400 text-sm font-medium">Ask the rider for the 6-digit start code.</p>
+            
+            <div className="flex justify-center space-x-2">
+               <input 
+                type="text" 
+                maxLength={6}
+                placeholder="000000"
+                className="w-full max-w-[200px] text-center py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-mono text-2xl font-black tracking-[0.2em] focus:border-black outline-none transition-all"
+                value={otpValue}
+                onChange={(e) => setOtpValue(e.target.value)}
+               />
+            </div>
+
             <button 
-              onClick={() => handleAction('started')}
-              className="w-full py-5 bg-black text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center shadow-lg active:scale-95 transition-all"
+              onClick={handleVerifyStart}
+              disabled={isVerifying || otpValue.length < 6}
+              className="w-full py-5 bg-black text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center shadow-lg active:scale-95 transition-all disabled:opacity-50"
             >
-              Start Trip
+              {isVerifying ? 'Verifying...' : 'Verify & Start Trip'}
             </button>
           </div>
         )}
@@ -260,13 +377,36 @@ export default function DriverNavigation({ ride, driverProfile, onTripEnd }: Dri
                 </div>
               </div>
             </div>
-            <button 
-              onClick={() => handleAction('completed')}
-              className="w-full py-5 bg-black text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center shadow-lg active:scale-95 transition-all"
-            >
-              Complete Trip
-              <ArrowRight className="ml-2" size={18} />
-            </button>
+
+            {!(currentRide as any).completion_otp ? (
+              <button 
+                onClick={handleRequestEnd}
+                disabled={isVerifying}
+                className="w-full py-5 bg-black text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center shadow-lg active:scale-95 transition-all disabled:opacity-50"
+              >
+                Request Trip End OTP
+              </button>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex justify-center space-x-2">
+                  <input 
+                    type="text" 
+                    maxLength={6}
+                    placeholder="Enter End OTP"
+                    className="w-full py-4 bg-white border-2 border-green-100 rounded-2xl font-mono text-xl font-black text-center tracking-[0.2em] focus:border-green-500 outline-none transition-all"
+                    value={otpValue}
+                    onChange={(e) => setOtpValue(e.target.value)}
+                  />
+                </div>
+                <button 
+                  onClick={handleVerifyEnd}
+                  disabled={isVerifying || otpValue.length < 6}
+                  className="w-full py-5 bg-green-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                >
+                  Verify & End Trip
+                </button>
+              </div>
+            )}
           </div>
         )}
       </motion.div>

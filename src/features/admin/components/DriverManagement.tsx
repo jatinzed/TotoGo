@@ -35,7 +35,7 @@ export default function DriverManagement({ onViewDocs }: DriverManagementProps) 
     const { error } = await supabase
       .from('driver_profiles')
       .update({ is_verified: isVerified, verification_status: isVerified ? 'verified' : 'rejected' })
-      .eq('user_id', userId);
+      .eq('id', userId);
 
     if (!error) {
       await supabase.from('admin_actions').insert({
@@ -86,7 +86,7 @@ export default function DriverManagement({ onViewDocs }: DriverManagementProps) 
       <div className="grid grid-cols-1 gap-4">
         {filteredDrivers.map(driver => (
           <motion.div 
-            key={driver.user_id} 
+            key={driver.id} 
             layout
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -139,14 +139,14 @@ export default function DriverManagement({ onViewDocs }: DriverManagementProps) 
                   Verify Docs
                 </button>
                 <div className="flex space-x-1">
-                  <button 
-                    onClick={() => handleVerifyDriver(driver.user_id, true)}
-                    className="p-3 bg-green-50 text-green-600 rounded-2xl hover:bg-green-500 hover:text-white transition-all shadow-sm"
-                  >
+                    <button 
+                      onClick={() => handleVerifyDriver(driver.id, true)}
+                      className="p-3 bg-green-50 text-green-600 rounded-2xl hover:bg-green-500 hover:text-white transition-all shadow-sm"
+                    >
                     <Check size={20} />
                   </button>
                   <button 
-                    onClick={() => handleVerifyDriver(driver.user_id, false)}
+                    onClick={() => handleVerifyDriver(driver.id, false)}
                     className="p-3 bg-red-50 text-red-600 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
                   >
                     <X size={20} />

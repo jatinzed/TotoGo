@@ -8,6 +8,7 @@ export interface UserProfile {
   avatar_url?: string;
   role: UserRole;
   is_active: boolean;
+  referral_code?: string;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +67,10 @@ export interface Ride {
   driver_rating?: number;
   rider_comment?: string;
   driver_comment?: string;
+  start_otp?: string;
+  completion_otp?: string;
+  start_otp_verified?: boolean;
+  completion_otp_verified?: boolean;
 }
 
 export interface DriverDocument {

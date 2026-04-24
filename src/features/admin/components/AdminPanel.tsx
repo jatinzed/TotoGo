@@ -20,6 +20,8 @@ import ComplaintsManagement from './ComplaintsManagement';
 import FinancialManagement from './FinancialManagement';
 import MarketingManagement from './MarketingManagement';
 import SettingsManagement from './SettingsManagement';
+import LiveDriverMap from './LiveDriverMap';
+import AuditLog from './AuditLog';
 
 type AdminTab = 'dashboard' | 'drivers' | 'riders' | 'rides' | 'complaints' | 'finance' | 'marketing' | 'settings' | 'audit' | 'map';
 
@@ -183,18 +185,8 @@ export default function AdminPanel() {
                  {activeTab === 'finance' && <FinancialManagement />}
                  {activeTab === 'marketing' && <MarketingManagement />}
                  {activeTab === 'settings' && <SettingsManagement />}
-                 {activeTab === 'audit' && (
-                    <div className="bg-white p-20 rounded-[40px] text-center border border-gray-100 italic text-gray-400">
-                       <History className="mx-auto mb-4 opacity-10" size={64} />
-                       <p>Audit logs coming soon.</p>
-                    </div>
-                 )}
-                 {activeTab === 'map' && (
-                    <div className="bg-white p-20 rounded-[40px] text-center border border-gray-100 italic text-gray-400">
-                       <MapIcon className="mx-auto mb-4 opacity-10" size={64} />
-                       <p>Live driver monitoring coming soon.</p>
-                    </div>
-                 )}
+                 {activeTab === 'audit' && <AuditLog />}
+                 {activeTab === 'map' && <LiveDriverMap />}
               </motion.div>
            </AnimatePresence>
         </div>

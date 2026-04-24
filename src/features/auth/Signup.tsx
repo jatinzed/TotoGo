@@ -18,6 +18,7 @@ export default function Signup() {
   const [phone, setPhone] = useState('');
   const [vehicleModel, setVehicleModel] = useState('');
   const [vehicleColor, setVehicleColor] = useState('');
+  const [referralCode, setReferralCode] = useState(searchParams.get('ref') || '');
   const [role, setRole] = useState<'rider' | 'driver'>(initialRole);
   const [error, setError] = useState('');
   const { signUp } = useAuthStore();
@@ -29,27 +30,32 @@ export default function Signup() {
       const data = await signUp(email, password, fullName, phone, role, vehicleModel, vehicleColor);
       const user = data?.user;
 
-      if (user) {
-        const refCode = searchParams.get('ref');
-        if (refCode && role === 'rider') {
-          const { data: referrer } = await supabase
-            .from('users')
-            .select('id')
-            .filter('id', 'ilike', `${refCode}%`)
-            .single();
+      if (user && referralCode && role === 'rider') {
+        const { data: referrer } = await supabase
+          .from('users')
+          .select('id')
+          .eq('referral_code', referralCode)
+          .single();
 
-          if (referrer) {
-            await supabase.from('referrals').insert({
-              referrer_id: referrer.id,
-              referee_id: user.id,
-              status: 'pending'
-            });
+        if (referrer) {
+          const { data: refData } = await supabase.from('referrals').insert({
+            referrer_id: referrer.id,
+            referee_id: user.id,
+            status: 'pending'
+          }).select('id').single();
+
+          if (refData) {
+            localStorage.setItem('pending_referral_id', refData.id);
             localStorage.setItem('pending_referral_referrer', referrer.id);
           }
         }
       }
 
-      navigate('/');
+      if (role === 'driver') {
+        navigate('/driver');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to sign up');
     }
@@ -161,6 +167,17 @@ export default function Signup() {
                 </div>
               </motion.div>
             )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Referral Code (Optional)</label>
+              <input
+                type="text"
+                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:ring-black focus:border-black sm:text-sm font-mono tracking-widest uppercase"
+                placeholder="E.g. JOHN1234"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+              />
+            </div>
 
             <div className="pt-2">
               <motion.button

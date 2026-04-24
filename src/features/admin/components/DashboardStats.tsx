@@ -63,6 +63,15 @@ export default function DashboardStats() {
         .select('*', { count: 'exact', head: true })
         .in('status', ['accepted', 'arrived', 'started']);
 
+      // Total revenue (platform platform_revenue credits) in paise
+      const { data: revenueData } = await supabase
+        .from('ledger_entries')
+        .select('amount')
+        .eq('account', 'platform_revenue')
+        .eq('entry_type', 'credit');
+      
+      const totalRevenuePaise = (revenueData || []).reduce((acc, curr) => acc + curr.amount, 0);
+
       setStats({
         totalRiders: ridersCount || 0,
         totalDrivers: driversCount || 0,
@@ -70,7 +79,7 @@ export default function DashboardStats() {
         activeRides: activeCount || 0,
         pendingVerifications: pendingCount || 0,
         openComplaints: complaintsCount || 0,
-        totalRevenue: 12540 // Mocking for now as we need complex aggregation for true revenue
+        totalRevenue: totalRevenuePaise / 100
       });
 
       // Mock chart data

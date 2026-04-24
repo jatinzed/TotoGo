@@ -110,13 +110,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (error) throw error;
 
     if (data.user && role === 'driver') {
+      const tempVehicleNumber = `TEMP_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const { error: profileError } = await supabase
         .from('driver_profiles')
         .insert({
-          user_id: data.user.id,
+          id: data.user.id,
           vehicle_model: vehicleModel || '',
           vehicle_color: vehicleColor || '',
-          vehicle_number: '', // Will be updated later
+          vehicle_number: tempVehicleNumber,
           online_status: false,
           is_busy: false,
           is_verified: false,

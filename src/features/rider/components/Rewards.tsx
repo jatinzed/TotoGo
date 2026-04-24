@@ -82,7 +82,31 @@ export default function RewardsPage() {
                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Available Coins</p>
                 </div>
              </div>
-             <button className="bg-black text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">Redeem Now</button>
+             <button 
+                onClick={async () => {
+                  if ((goCoins?.balance || 0) < 10) {
+                    alert('You need at least 10 GoCoins to redeem!');
+                    return;
+                  }
+                  const { data, error } = await supabase.rpc('redeem_gocoins', {
+                    p_user_id: profile!.id,
+                    p_amount: 10,
+                    p_idempotency_key: crypto.randomUUID()
+                  });
+                  if (error) {
+                    alert(error.message);
+                  } else if (data?.error) {
+                    alert(data.error);
+                  } else {
+                    alert(`Success! ₹${data.discount_applied} discount applied to your next ride.`);
+                    fetchRewardsData();
+                  }
+                }}
+                className="bg-black text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-800 transition-all active:scale-95"
+              >
+                Redeem 10
+              </button>
+             
           </div>
        </div>
 

@@ -16,7 +16,17 @@ export default function Login() {
     e.preventDefault();
     try {
       await signIn(email, password);
-      navigate('/');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase.from('users').select('role').eq('id', user.id).single();
+        if (profile?.role === 'driver') {
+          navigate('/driver');
+        } else {
+          navigate('/');
+        }
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to login');
     }

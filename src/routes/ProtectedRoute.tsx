@@ -25,8 +25,12 @@ export const ProtectedRoute = ({ children, roles }: { children: React.ReactNode,
   }
   
   if (roles && profile && !roles.includes(profile.role)) {
+    // If it's a specific route but user has 'both' roles, allow them IF it's one of their roles
+    if (profile.role === 'both') return <>{children}</>;
+    
+    // Fallback redirects
     if (profile.role === 'driver') return <Navigate to="/driver" replace />;
-    if (profile.role === 'rider') return <Navigate to="/" replace />;
+    if (profile.role === 'rider' || profile.role === 'admin') return <Navigate to="/" replace />;
     return <Navigate to="/welcome" replace />;
   }
   

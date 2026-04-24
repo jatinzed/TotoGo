@@ -165,6 +165,26 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {(profile?.role === 'driver' || profile?.role === 'admin') && (
+        <button 
+          onClick={() => navigate('/driver')}
+          className="w-full py-5 bg-green-600 text-white rounded-3xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-green-700 transition-all mb-4"
+        >
+          <Car size={16} />
+          <span>Go to Driver Mode</span>
+        </button>
+      )}
+      
+      {(profile?.email === 'comrade.jotinmoy.010@proton.me' || profile?.role === 'admin') && (
+        <button 
+          onClick={() => navigate('/admin')}
+          className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-blue-700 transition-all mb-4"
+        >
+          <Shield size={16} />
+          <span>Go to Admin Panel</span>
+        </button>
+      )}
+
       <button 
         onClick={handleSignOut}
         className="w-full py-5 bg-black text-white rounded-3xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 hover:bg-gray-900 transition-all mb-10"

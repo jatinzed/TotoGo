@@ -13,6 +13,9 @@ import { useAuthStore } from '../../common/stores/authStore';
 import { parsePoint, toLatLngTuple } from '../../../utils/geo';
 import { ChangeView } from '../../../components/common/ChangeView';
 
+import { AutoRickshawIcon } from '../../../components/common/AutoRickshawIcon';
+import { renderToString } from 'react-dom/server';
+
 export default function RideTracking() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -141,32 +144,15 @@ export default function RideTracking() {
         .eq('status', 'completed');
 
       if (count === 1) { // This is the first completed ride (including this one)
-        const referrerId = localStorage.getItem('pending_referral_referrer');
-        if (referrerId) {
-          // Update referral status
-          await supabase
-            .from('referrals')
-            .update({ status: 'completed', completed_at: new Date().toISOString() })
-            .eq('referrer_id', referrerId)
-            .eq('referee_id', ride.rider_id);
-
-          // Reward Referrer (10 GoCoin)
-          const { error: r1 } = await supabase.rpc('adjust_gocoins', {
-            p_user_id: referrerId,
-            p_amount: 10,
-            p_description: 'Referral Bonus (Referrer)',
-            p_idempotency_key: crypto.randomUUID()
+        const referralId = localStorage.getItem('pending_referral_id');
+        if (referralId) {
+          // Claim referral reward via RPC
+          const { data: res, error } = await supabase.rpc('claim_referral_reward', {
+            p_referral_id: referralId
           });
 
-          // Reward Referee (5 GoCoin)
-          const { error: r2 } = await supabase.rpc('adjust_gocoins', {
-            p_user_id: ride.rider_id,
-            p_amount: 5,
-            p_description: 'Referral Bonus (Welcome)',
-            p_idempotency_key: crypto.randomUUID()
-          });
-
-          if (!r1 && !r2) {
+          if (!error && res?.status === 'ok') {
+             localStorage.removeItem('pending_referral_id');
              localStorage.removeItem('pending_referral_referrer');
           }
         }
@@ -204,11 +190,16 @@ export default function RideTracking() {
             } as any)}
           />
           {/* PostGIS geometry needs parsing. Assuming standard lat/lng for visualization here */}
-          {driverLocation && parsePoint(driverLocation) && (
+          {driverLocation && (
             <Marker 
               {...({
                 position: toLatLngTuple(driverLocation),
-                icon: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', iconSize: [32, 32] })
+                icon: L.divIcon({
+                  html: renderToString(<AutoRickshawIcon className="w-8 h-8 -rotate-90" />),
+                  className: 'bg-transparent',
+                  iconSize: [32, 32],
+                  iconAnchor: [16, 16]
+                })
               } as any)} 
             />
           )}
@@ -264,6 +255,23 @@ export default function RideTracking() {
                   </div>
                </div>
             </div>
+
+            {/* OTP Display */}
+            {['requested', 'accepted', 'arrived'].includes(ride.status) && ride.start_otp && (
+              <div className="mb-6 p-4 bg-orange-50 border border-orange-100 rounded-3xl text-center">
+                <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-1">Start Trip OTP</p>
+                <p className="text-4xl font-black tracking-tighter text-orange-600 font-mono">{(ride as any).start_otp}</p>
+                <p className="text-[10px] text-orange-400 font-bold mt-1">Share this with the driver to start the ride</p>
+              </div>
+            )}
+
+            {ride.status === 'started' && (ride as any).completion_otp && (
+              <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-3xl text-center">
+                <p className="text-[10px] font-black text-green-400 uppercase tracking-widest mb-1">End Trip OTP</p>
+                <p className="text-4xl font-black tracking-tighter text-green-600 font-mono">{(ride as any).completion_otp}</p>
+                <p className="text-[10px] text-green-400 font-bold mt-1">Share this with the driver only at destination</p>
+              </div>
+            )}
 
             {driver ? (
               <div className="bg-gray-50 p-5 rounded-3xl mb-6">

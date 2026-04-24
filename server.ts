@@ -12,6 +12,42 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Nominatim Search Proxy
+  app.get("/api/geo/search", async (req, res) => {
+    const { q } = req.query;
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(String(q))}&limit=5&countrycodes=in`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'TotoGo-App/1.0'
+        }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error('Nominatim Search Error:', err);
+      res.status(500).json({ error: 'Search failed' });
+    }
+  });
+
+  // Nominatim Reverse Proxy
+  app.get("/api/geo/reverse", async (req, res) => {
+    const { lat, lon } = req.query;
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'TotoGo-App/1.0'
+        }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error('Nominatim Reverse Error:', err);
+      res.status(500).json({ error: 'Geocoding failed' });
+    }
+  });
+
   // OSM/OSRM Route API
   app.get("/api/route", async (req, res) => {
     const { start, end } = req.query;

@@ -28,7 +28,7 @@ export default function DriverEarnings() {
       .from('wallet_transactions')
       .select('*')
       .eq('user_id', profile!.id)
-      .in('transaction_type', ['ride_earning', 'cancellation_compensation'])
+      .in('type', ['ride_earning', 'cancellation_compensation'])
       .order('created_at', { ascending: false });
 
     if (data) {
@@ -36,8 +36,8 @@ export default function DriverEarnings() {
       
       const breakdown = data.reduce((acc, tx) => {
         const amount = Math.abs(tx.amount);
-        if (tx.transaction_type === 'ride_earning') acc.rideEarnings += amount;
-        if (tx.transaction_type === 'cancellation_compensation') acc.cancellationCompensation += amount;
+        if (tx.type === 'ride_earning') acc.rideEarnings += amount;
+        if (tx.type === 'cancellation_compensation') acc.cancellationCompensation += amount;
         acc.total += amount;
         return acc;
       }, { rideEarnings: 0, cancellationCompensation: 0, total: 0 });
@@ -109,13 +109,13 @@ export default function DriverEarnings() {
                        <div className="flex items-center space-x-4">
                           <div className={cn(
                             "p-3 rounded-2xl",
-                            tx.transaction_type === 'ride_earning' ? "bg-green-50 text-green-600" : "bg-blue-50 text-blue-600"
+                            tx.type === 'ride_earning' ? "bg-green-50 text-green-600" : "bg-blue-50 text-blue-600"
                           )}>
-                             {tx.transaction_type === 'ride_earning' ? <Car size={20} /> : <AlertCircle size={20} />}
+                             {tx.type === 'ride_earning' ? <Car size={20} /> : <AlertCircle size={20} />}
                           </div>
                           <div>
                              <p className="font-black text-sm text-black">
-                                {tx.transaction_type === 'ride_earning' ? 'Ride Earning' : 'Cancellation Compensation'}
+                                {tx.type === 'ride_earning' ? 'Ride Earning' : 'Cancellation Compensation'}
                              </p>
                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                                 {format(new Date(tx.created_at), 'dd MMM, hh:mm a')}

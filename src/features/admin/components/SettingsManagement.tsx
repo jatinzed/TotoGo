@@ -39,16 +39,23 @@ export default function SettingsManagement() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('system_settings')
-        .upsert({ id: 1, ...settings });
+      const { error } = await supabase.rpc('update_system_settings', {
+        p_settings: settings
+      });
       
       if (error) throw error;
+
+      // Log the action
+      await supabase.from('admin_actions').insert({
+        admin_id: (await supabase.auth.getUser()).data.user?.id,
+        action_type: 'update_settings',
+        details: settings
+      });
+
       alert('Settings updated successfully');
     } catch (err: any) {
       console.error(err);
-      // If table doesn't exist, we might get an error here too
-      alert('Error saving settings. Make sure the system_settings table exists.');
+      alert('Error saving settings: ' + err.message);
     } finally {
       setSaving(false);
     }

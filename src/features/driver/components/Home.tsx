@@ -9,11 +9,26 @@ import { ChangeView } from '../../../components/common/ChangeView';
 import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { motion, AnimatePresence } from 'motion/react';
-import { Power, MapPin, Navigation, CheckCircle2, ChevronRight, Loader2, ArrowRight, RefreshCw, Share2, Award, X } from 'lucide-react';
+import { Power, MapPin, Navigation, CheckCircle2, ChevronRight, Loader2, ArrowRight, RefreshCw, Share2, Award, X, Bell } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import DriverNavigation from './DriverNavigation';
 import { getDistanceFromLatLonInMeters } from '../../../utils/distance';
 import { sendPushNotification } from '../../../lib/notifications/onesignal';
+
+// Audio and Vibration Helper
+const playRideAlert = () => {
+  try {
+    const audio = new Audio('/sounds/ride_request.mp3');
+    audio.play().catch(e => console.warn('Autoplay blocked:', e));
+    
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200]);
+    }
+  } catch (err) {
+    console.error('Alert failed:', err);
+  }
+};
 
 const RideRequestCard = ({ 
   request, 
@@ -27,6 +42,17 @@ const RideRequestCard = ({
   const [timeLeft, setTimeLeft] = useState(15);
 
   useEffect(() => {
+    // Play alert when a new request shows up
+    playRideAlert();
+    
+    // Web Notification
+    if (Notification.permission === 'granted') {
+      new Notification('New Ride Request', {
+        body: `Pickup: ${request.pickup_address} - ${formatCurrency(request.fare)}`,
+        icon: '/favicon.ico'
+      });
+    }
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -80,6 +106,7 @@ const RideRequestCard = ({
 
 export default function DriverHome() {
   const { profile, refreshBalance } = useAuthStore();
+  const navigate = useNavigate();
   const { getRoute } = useRouting();
 
   const [driverProfile, setDriverProfile] = useState<DriverProfile | null>(null);
@@ -91,8 +118,9 @@ export default function DriverHome() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showPromoter, setShowPromoter] = useState(false);
   const [formallyAccepted, setFormallyAccepted] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
   
-  const referralCode = profile ? `DRV-${profile.id.slice(0, 8).toUpperCase()}` : '';
+  const referralCode = profile?.referral_code || '';
   
   const locationInterval = useRef<number | null>(null);
   const pollingInterval = useRef<number | null>(null);
@@ -101,12 +129,31 @@ export default function DriverHome() {
     if (profile) {
       fetchDriverStatus();
       subscribeToRideAssignments();
+      checkNotificationPermission();
     }
     return () => {
       stopWatchingLocation();
       stopPollingRequests();
     };
   }, [profile]);
+
+  const checkNotificationPermission = async () => {
+    if ('Notification' in window) {
+      setNotifPermission(Notification.permission);
+    }
+  };
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+      
+      // Interaction fallback for audio
+      const audio = new Audio('/sounds/ride_request.mp3');
+      audio.volume = 0;
+      audio.play().catch(() => {});
+    }
+  };
 
   useEffect(() => {
     // Re-start location watching with new frequency when ride status changes
@@ -127,7 +174,7 @@ export default function DriverHome() {
     const { data } = await supabase
       .from('driver_profiles')
       .select('*')
-      .eq('user_id', profile!.id)
+      .eq('id', profile!.id)
       .single();
     
     if (data) {
@@ -181,7 +228,7 @@ export default function DriverHome() {
                location: `POINT(${longitude} ${latitude})`,
                last_location_update: new Date().toISOString()
             })
-            .eq('user_id', profile!.id)
+            .eq('id', profile!.id)
             .select()
             .single();
           
@@ -260,7 +307,7 @@ export default function DriverHome() {
     await supabase
       .from('driver_profiles')
       .update({ online_status: newStatus })
-      .eq('user_id', profile!.id);
+      .eq('id', profile!.id);
 
     if (newStatus) {
       startWatchingLocation();
@@ -382,6 +429,7 @@ export default function DriverHome() {
     if (!currentRide) return;
     const rideId = currentRide.id;
     setCurrentRide(null);
+    setFormallyAccepted(false);
     
     await supabase.rpc('release_driver_and_redispatch', { 
       p_ride_id: rideId,
@@ -467,14 +515,23 @@ export default function DriverHome() {
           )}
         </MapContainer>
 
-        {!currentRide && (
+        {online && !currentRide && (
            <div className="absolute top-4 left-0 right-0 px-6 z-[1000]">
               <div className="bg-white p-4 rounded-3xl shadow-xl border border-gray-100 flex items-center justify-between">
                  <div>
                     <p className="font-black text-xl">{online ? 'You are Online' : 'You are Offline'}</p>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-0.5">
-                      {online ? 'Listening for rides' : 'Go online to receive jobs'}
-                    </p>
+                    <div className="flex items-center space-x-2 mt-0.5">
+                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                         {online ? 'Listening for rides' : 'Go online to receive jobs'}
+                       </p>
+                       <span className="text-[10px] text-gray-300">|</span>
+                       <button 
+                         onClick={() => navigate('/')}
+                         className="text-[10px] font-black text-blue-500 uppercase tracking-widest hover:underline"
+                       >
+                         Rider Mode
+                       </button>
+                    </div>
                  </div>
                  <button 
                   onClick={toggleOnline}
@@ -486,6 +543,24 @@ export default function DriverHome() {
                     <Power size={24} />
                  </button>
               </div>
+
+              {notifPermission !== 'granted' && (
+                <button 
+                  onClick={requestNotificationPermission}
+                  className="mt-4 w-full bg-yellow-50 border border-yellow-100 p-4 rounded-3xl shadow-lg flex items-center justify-between hover:bg-yellow-100 transition-all active:scale-95"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-yellow-100 text-yellow-600 rounded-xl">
+                      <Bell size={20} />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-black text-sm text-yellow-900">Enable Ride Alerts</p>
+                      <p className="text-[10px] text-yellow-700 font-bold uppercase tracking-widest">Get sound & push alerts</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-yellow-400" />
+                </button>
+              )}
 
               <button 
                 onClick={() => setShowPromoter(true)}
@@ -515,12 +590,21 @@ export default function DriverHome() {
             className="absolute bottom-6 left-0 right-0 px-6 space-y-4 z-20 max-h-[60%] overflow-y-auto"
           >
             {/* Show Assigned Ride First if not accepted yet */}
-            {currentRide && currentRide.status === 'accepted' && !formallyAccepted && (
-              <RideRequestCard 
-                request={currentRide}
-                onAccept={handleAcceptRide}
-                onTimeout={handleRideTimeout}
-              />
+            {currentRide && currentRide.status === 'requested' && !formallyAccepted && (
+              <div className="space-y-3">
+                <RideRequestCard 
+                  request={currentRide}
+                  onAccept={handleAcceptRide}
+                  onTimeout={handleRideTimeout}
+                />
+                <button 
+                  onClick={handleDecline}
+                  className="w-full py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center space-x-2 active:scale-95 transition-all"
+                >
+                  <X size={18} />
+                  <span>Decline Ride</span>
+                </button>
+              </div>
             )}
 
             {/* Nearby Broadcase Requests */}

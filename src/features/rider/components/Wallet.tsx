@@ -81,13 +81,34 @@ export default function WalletPage() {
                  {addingMoney ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
                  <span>Top Up</span>
                </button>
-               <div className="bg-white/10 backdrop-blur-md py-4 rounded-2xl flex flex-col items-center justify-center border border-white/5">
+               <button 
+                onClick={async () => {
+                  if ((goCoin?.balance || 0) < 10) {
+                    alert('You need at least 10 GoCoins to redeem!');
+                    return;
+                  }
+                  const { data, error } = await supabase.rpc('redeem_gocoins', {
+                    p_user_id: profile!.id,
+                    p_amount: 10,
+                    p_idempotency_key: crypto.randomUUID()
+                  });
+                  if (error) {
+                    alert(error.message);
+                  } else if (data?.error) {
+                    alert(data.error);
+                  } else {
+                    alert(`Success! ₹${data.discount_applied} discount applied to your next ride.`);
+                    fetchWalletData();
+                  }
+                }}
+                className="bg-white/10 backdrop-blur-md py-4 rounded-2xl flex flex-col items-center justify-center border border-white/5 hover:bg-white/20 transition-all active:scale-95"
+               >
                   <div className="flex items-center space-x-2 mb-1">
                     <Coins size={14} className="text-white" />
                     <span className="text-sm font-black">{goCoin?.balance || 0}</span>
                   </div>
-                  <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">GoCoins</span>
-               </div>
+                  <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">Redeem Coins</span>
+               </button>
             </div>
         </div>
 

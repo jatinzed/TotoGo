@@ -77,11 +77,13 @@ export const useRideStore = create<RideState>((set, get) => ({
       }
 
       // Notify rider about assignment
-      await supabase.from('notifications').insert({
-        user_id: get().currentRide?.rider_id || '',
-        title: 'Driver Assigned',
-        body: 'A driver has accepted your request and is on the way!'
-      });
+      if (get().currentRide?.rider_id) {
+        await supabase.from('notifications').insert({
+          user_id: get().currentRide!.rider_id,
+          title: 'Driver Assigned',
+          body: 'A driver has accepted your request and is on the way!'
+        });
+      }
 
       return { success: true };
     } catch (err: any) {

@@ -21,7 +21,7 @@ export async function initOneSignal() {
       await OneSignal.Notifications.requestPermission();
     }
 
-    const playerId = (OneSignal.User as any).PushSubscription.id;
+    const playerId = (OneSignal.User as any)?.PushSubscription?.id;
     if (playerId) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -30,7 +30,7 @@ export async function initOneSignal() {
           token: playerId,
           device_type: 'onesignal',
           updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id, token' });
+        }, { onConflict: ['user_id', 'token' ] as any });
       }
     }
   } catch (error) {
